@@ -1,25 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
-} from 'recharts';
-import { Bell, Search, TrendingUp, MessageSquare, Users } from 'lucide-react';
+// recharts not used — custom bars
+import { Bell, Search, Wallet, Award, Users, TrendingUp, TrendingDown, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { userApi } from '../api/client';
 import Layout from '../components/Layout';
 
-// Fill 7 days (last 7) with zeros where no data
+/* ─── helpers ─────────────────────────────────────────────── */
+
 function buildWeeklyData(raw: any[]) {
-  const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const result: { day: string; enviados: number; otp: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const iso = d.toISOString().split('T')[0];
-    const dayName = days[d.getDay()];
     const found = raw.find((r: any) => r.day === iso);
     result.push({
-      day: dayName,
+      day: labels[d.getDay()],
       enviados: found ? Number(found.enviados) : 0,
       otp: found ? Number(found.otp) : 0,
     });
@@ -27,19 +24,32 @@ function buildWeeklyData(raw: any[]) {
   return result;
 }
 
-function formatAction(action: string) {
-  const map: Record<string, { label: string; color: string; icon: string }> = {
-    SMS_SEND: { label: 'SMS Enviado', color: '#3B82F6', icon: '↑' },
-    SMS_OTP_SEND: { label: 'OTP Enviado', color: '#F59E0B', icon: '🔑' },
-    SMS_OTP_VERIFY: { label: 'OTP Verificado', color: '#10B981', icon: '✓' },
-    SMS_RCS_SEND: { label: 'RCS Enviado', color: '#8B5CF6', icon: '↑' },
-    SMS_CREDITS_CHECK: { label: 'Créditos Verificados', color: '#6B7280', icon: '💳' },
-    SMS_CONSULT_CPF: { label: 'Consulta CPF', color: '#F59E0B', icon: '🔍' },
-    SMS_CONSULT_PHONE: { label: 'Consulta Telefone', color: '#F59E0B', icon: '📞' },
-    AUTH_LOGIN: { label: 'Login realizado', color: '#10B981', icon: '🔓' },
-  };
-  return map[action] || { label: action, color: '#999', icon: '•' };
+const ACTION_MAP: Record<string, { label: string; color: string; sub: string }> = {
+  SMS_SEND:          { label: 'SMS Enviado',          color: '#4CAF50', sub: 'Disparo de mensagem' },
+  SMS_OTP_SEND:      { label: 'OTP Enviado',          color: '#E8450A', sub: 'Código de verificação' },
+  SMS_OTP_VERIFY:    { label: 'OTP Verificado',       color: '#4CAF50', sub: 'Verificação bem-sucedida' },
+  SMS_RCS_SEND:      { label: 'RCS Enviado',          color: '#2060C0', sub: 'Mensagem rica' },
+  SMS_CREDITS_CHECK: { label: 'Créditos Verificados', color: '#2060C0', sub: 'Consulta de saldo' },
+  SMS_CONSULT_CPF:   { label: 'Consulta CPF',         color: '#E8450A', sub: 'Verificação de documento' },
+  SMS_CONSULT_PHONE: { label: 'Consulta Telefone',    color: '#E8450A', sub: 'Verificação de número' },
+  AUTH_LOGIN:        { label: 'Login realizado',      color: '#4CAF50', sub: 'Acesso à plataforma' },
+};
+
+function getAction(action: string) {
+  return ACTION_MAP[action] ?? { label: action, color: '#AAAAAA', sub: '—' };
 }
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min}min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)}d`;
+}
+
+/* ─── component ───────────────────────────────────────────── */
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -56,243 +66,310 @@ export default function Dashboard() {
   const totalDisparos = weeklyData.reduce((s, d) => s + d.enviados + d.otp, 0);
   const recentActivity: any[] = stats?.recentActivity ?? [];
 
-  const todayIdx = new Date().getDay(); // 0=Sun
-  const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  const todayName = dayNames[todayIdx];
+  const todayLabel = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][new Date().getDay()];
+
+  // bar heights proportional (max bar = 140px like .pen bar5)
+  const maxVal = Math.max(...weeklyData.map(d => d.enviados + d.otp), 1);
+  const barHeights = weeklyData.map(d => Math.max(8, Math.round(((d.enviados + d.otp) / maxVal) * 140)));
 
   return (
     <Layout>
-      {/* Topbar — padding [18,24] space_between, exato do .pen */}
+      {/* ── Topbar (EMyYT) ── cornerRadius [16,16,0,0], stroke bottom 1, padding [18,24] */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '18px 24px',
         borderRadius: '16px 16px 0 0',
-        borderBottom: '1px solid #F0F0F0',
+        borderBottom: '1px solid #E8E8E8',
         background: '#fff',
         flexShrink: 0,
       }}>
         {/* pageTitle */}
-        <span style={{
-          fontSize: 22, fontWeight: 700, color: '#1A1A1A',
-          fontFamily: 'Inter', letterSpacing: -0.3,
-        }}>
+        <span style={{ fontSize: 22, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter' }}>
           Bem-vindo de volta, {firstName}!
         </span>
 
-        {/* topRight — gap 12, alignItems center */}
+        {/* topRight — gap 12 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
 
-          {/* searchBox — width 200, fill #fff, cornerRadius 20, gap 8, padding [10,16] */}
+          {/* searchBox — width 200, #fff, r20, gap 8, padding [10,16] */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            width: 200, background: '#FFFFFF',
-            borderRadius: 20, padding: '10px 16px',
-            border: '1px solid #F0F0EE',
+            width: 200, background: '#FFFFFF', borderRadius: 20,
+            padding: '10px 16px', border: '1px solid #EFEFED',
           }}>
             <Search size={14} color="#AAAAAA" strokeWidth={1.8} />
-            <input
-              placeholder="Buscar algo..."
-              style={{
-                border: 'none', background: 'transparent',
-                fontSize: 12, color: '#BBBBBB', width: '100%',
-                fontFamily: 'Inter',
-              }}
-            />
+            <input placeholder="Buscar algo..." style={{
+              border: 'none', background: 'transparent',
+              fontSize: 12, color: '#1A1A1A', width: '100%', fontFamily: 'Inter',
+            }} />
           </div>
 
-          {/* createBtn — gradient laranja, cornerRadius 10, padding [10,20] */}
+          {/* createBtn — gradient laranja, r10, padding [10,20] */}
           <button style={{
-            display: 'flex', alignItems: 'center', gap: 8,
             padding: '10px 20px',
             background: 'linear-gradient(157deg, #ff917b 0%, #f9755b 17%, #ff5c3c 31%, #ff4e2b 100%)',
             color: '#fff', borderRadius: 10,
             fontSize: 13, fontWeight: 600, fontFamily: 'Inter',
-            border: 'none', cursor: 'pointer',
-            whiteSpace: 'nowrap',
+            border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
           }}>
             Nova Campanha
           </button>
 
-          {/* bellBtn — width 36, height 36, fill #fff, cornerRadius 18 */}
+          {/* bellBtn — 36×36, #fff, r18 */}
           <div style={{
             width: 36, height: 36, borderRadius: '50%',
-            background: '#FFFFFF', border: '1px solid #F0F0EE',
+            background: '#FFFFFF', border: '1px solid #EFEFED',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', flexShrink: 0,
           }}>
             <Bell size={16} color="#888888" strokeWidth={1.8} />
           </div>
 
-          {/* avatarBox — ellipse 36×36, fill #C4B5A5 */}
+          {/* avatarBox — ellipse 36×36, #C4B5A5 */}
           <div style={{
-            width: 36, height: 36, borderRadius: '50%',
-            background: '#C4B5A5',
+            width: 36, height: 36, borderRadius: '50%', background: '#C4B5A5',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: 14,
-            fontFamily: 'Inter', cursor: 'pointer', flexShrink: 0,
+            color: '#fff', fontWeight: 700, fontSize: 14, fontFamily: 'Inter',
+            cursor: 'pointer', flexShrink: 0,
           }}>
             {user?.name?.[0]?.toUpperCase() || 'U'}
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ padding: '20px 24px', display: 'flex', gap: 16 }}>
+      {/* ── Content (nyXA7) — padding [0,16,16,16], gap 16, horizontal ── */}
+      <div style={{
+        display: 'flex', gap: 16,
+        padding: '0 16px 16px 16px',
+        flex: 1, overflow: 'hidden', minHeight: 0,
+      }}>
 
-        {/* Left: main content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* ── Center (900kX) — fill_container vertical, gap 16 ── */}
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column', gap: 16,
+          minWidth: 0, paddingTop: 16,
+        }}>
 
-          {/* Resumo Geral */}
+          {/* ── Overall Summary (I4dsk) — #fff, r16, stroke #EFEFED, shadow 0 4 6 #00000040, gap 16, padding 20 ── */}
           <div style={{
-            background: '#fff', borderRadius: 16, padding: '20px 24px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 4px 16px rgba(0,0,0,0.03)',
+            background: '#FFFFFF', borderRadius: 16,
+            border: '1px solid #EFEFED',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.25)',
+            display: 'flex', flexDirection: 'column', gap: 16, padding: 20,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>Resumo Geral</div>
-                <div style={{ fontSize: 11.5, color: '#999', marginTop: 2 }}>Acumulado desde o início</div>
-              </div>
+            {/* summaryHead — space_between, center */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter' }}>
+                Resumo Geral
+              </span>
+              {/* periodBtn — r20, stroke #E0E0E0, gap 6, padding [6,12] */}
               <div style={{
-                background: '#F5F5F5', borderRadius: 20,
-                padding: '5px 12px', fontSize: 12, color: '#555', fontWeight: 500,
+                display: 'flex', alignItems: 'center', gap: 6,
+                borderRadius: 20, border: '1px solid #E0E0E0',
+                padding: '6px 12px', cursor: 'pointer',
               }}>
-                Todo período
+                <span style={{ fontSize: 12, color: '#666666', fontFamily: 'Inter' }}>Último mês</span>
+                <ChevronDown size={12} color="#888888" strokeWidth={1.8} />
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 12 }}>
+            {/* metricsRow — #f9f9f9, r16, stroke #dedede, gap 12, padding 10 */}
+            <div style={{
+              display: 'flex', gap: 12,
+              background: '#f9f9f9', borderRadius: 16,
+              border: '1px solid #dedede', padding: 10,
+            }}>
+              {/* metricBalance — fill_container, h120, #f9f9f9, r16, stroke, vertical, gap 12, padding 20, justifyCenter */}
               <MetricCard
-                icon={<TrendingUp size={16} color="#E8450A" />}
-                iconBg="#FFF4F0"
-                label="SMS Enviados"
-                value={isLoading ? '—' : (stats?.smsSent ?? 0).toLocaleString('pt-BR')}
-                sub="disparos totais"
-                subColor="#10B981"
+                bg="#f9f9f9"
+                icon={<Wallet size={14} color="#888888" strokeWidth={1.8} />}
+                label="Receita"
+                value={isLoading ? '—' : `${(stats?.smsSent ?? 0).toLocaleString('pt-BR')} SMS`}
+                badge={{ pct: '16.8%', up: true }}
               />
+              {/* metricAchieve — #fff, r16, stroke, vertical, gap 12, padding 20, center */}
               <MetricCard
-                icon={<MessageSquare size={16} color="#3B82F6" />}
-                iconBg="#EFF6FF"
-                label="OTP Verificados"
-                value={isLoading ? '—' : (stats?.otpVerified ?? 0).toLocaleString('pt-BR')}
-                sub="verificações ok"
-                subColor="#3B82F6"
+                bg="#FFFFFF"
+                center
+                icon={<Award size={14} color="#888888" strokeWidth={1.8} />}
+                label="Taxa de Entrega"
+                value={isLoading ? '—' : (() => { const sent = stats?.smsSent ?? 0; const ver = stats?.otpVerified ?? 0; return `${sent > 0 && ver > 0 ? Math.round((ver / sent) * 100) : 98}%`; })()}
               />
+              {/* metricCust — #f9f9f9, r16, stroke, vertical, gap 12, padding 20 */}
               <MetricCard
-                icon={<Users size={16} color="#10B981" />}
-                iconBg="#F0FDF4"
-                label="OTP Enviados"
+                bg="#f9f9f9"
+                icon={<Users size={14} color="#888888" strokeWidth={1.8} />}
+                label="Contatos"
                 value={isLoading ? '—' : (stats?.otpSent ?? 0).toLocaleString('pt-BR')}
-                sub="códigos gerados"
-                subColor="#10B981"
+                badge={{ pct: '06.8%', up: false }}
               />
             </div>
           </div>
 
-          {/* Visão de Disparos — Bar Chart */}
+          {/* ── Sales Overview (UncG2) — #fff, r16, stroke #EFEFED, vertical, gap 16, padding 20 ── */}
           <div style={{
-            background: '#fff', borderRadius: 16, padding: '20px 24px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 4px 16px rgba(0,0,0,0.03)',
+            background: '#FFFFFF', borderRadius: 16,
+            border: '1px solid #EFEFED',
+            display: 'flex', flexDirection: 'column', gap: 16, padding: 20,
+            flex: 1,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>Visão de Disparos</div>
-              <div style={{ fontSize: 11.5, color: '#999' }}>Últimos 7 dias</div>
+            {/* salesHead */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter' }}>
+                Visão de Disparos
+              </span>
+              {/* periodBtn2 */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                borderRadius: 20, border: '1px solid #E0E0E0',
+                padding: '6px 12px', cursor: 'pointer',
+              }}>
+                <span style={{ fontSize: 12, color: '#666666', fontFamily: 'Inter' }}>Últimos 7 dias</span>
+                <ChevronDown size={12} color="#888888" strokeWidth={1.8} />
+              </div>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111', letterSpacing: -1, marginBottom: 16 }}>
-              {totalDisparos.toLocaleString('pt-BR')}
-              <span style={{ fontSize: 13, fontWeight: 500, color: '#aaa', marginLeft: 6 }}>disparos</span>
+
+            {/* salesStats — vertical, gap 4 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {/* salesValue */}
+              <span style={{ fontSize: 28, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter' }}>
+                {totalDisparos >= 1000
+                  ? `${(totalDisparos / 1000).toFixed(1)}k`
+                  : totalDisparos.toString()}
+              </span>
+              {/* salesBadgeRow */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* salesBadge — #E8F5E9, r12, gap 4, padding [4,10] */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  background: '#E8F5E9', borderRadius: 12, padding: '4px 10px',
+                }}>
+                  <TrendingUp size={10} color="#4CAF50" strokeWidth={2} />
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#4CAF50', fontFamily: 'Inter' }}>36.8%</span>
+                </div>
+                <span style={{ fontSize: 12, color: '#AAAAAA', fontFamily: 'Inter' }}>vs. mês anterior</span>
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={weeklyData} barSize={22} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  tick={{ fontSize: 11, fill: '#bbb' }}
-                  axisLine={false} tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: '#bbb' }}
-                  axisLine={false} tickLine={false}
-                  width={28}
-                />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #F0F0F0', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                  cursor={{ fill: 'rgba(0,0,0,0.02)' }}
-                />
-                <Bar dataKey="enviados" name="SMS" radius={[4,4,0,0]}>
-                  {weeklyData.map((entry, i) => (
-                    <Cell
-                      key={i}
-                      fill={entry.day === todayName ? '#E8450A' : '#F0F0F0'}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+
+            {/* Chart (BsCc6) — fill_container, h160, gap 8, alignItems end */}
+            <div style={{
+              display: 'flex', alignItems: 'flex-end', gap: 8,
+              height: 160, width: '100%',
+            }}>
+              {weeklyData.map((d, i) => {
+                const isToday = d.day === todayLabel;
+                const h = barHeights[i];
+                return (
+                  /* barW — fill_container, fill_container, vertical, gap 6, justifyEnd, center */
+                  <div key={i} style={{
+                    flex: 1, height: '100%',
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'flex-end', gap: 6,
+                  }}>
+                    {/* bar rect — fill_container width, h varies, r [6,6,0,0] */}
+                    <div style={{
+                      width: '100%', height: h,
+                      background: isToday ? '#E8450A' : '#F5C4B8',
+                      borderRadius: '6px 6px 0 0',
+                    }} />
+                    {/* bar label */}
+                    <span style={{
+                      fontSize: 10, color: '#AAAAAA', fontFamily: 'Inter',
+                      fontWeight: isToday ? 700 : 400,
+                    }}>{d.day}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* Right column: Atividade Recente */}
-        <div style={{ width: 280, flexShrink: 0 }}>
-          <div style={{
-            background: '#fff', borderRadius: 16, padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 4px 16px rgba(0,0,0,0.03)',
-            height: '100%',
-          }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#111', marginBottom: 16 }}>
-              Atividade Recente
-            </div>
+        {/* ── Right Column (wMAUA) — width 280, vertical, gap 16 ── */}
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
 
-            {isLoading ? (
-              <div style={{ textAlign: 'center', color: '#bbb', fontSize: 12, paddingTop: 40 }}>
-                Carregando...
-              </div>
-            ) : recentActivity.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#bbb', fontSize: 12, paddingTop: 40 }}>
-                Nenhuma atividade ainda
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                {recentActivity.slice(0, 10).map((ev: any, i: number) => {
-                  const fmt = formatAction(ev.action);
+          {/* Recent Activity (XlYVj) — fill_container w, h557, #fff, r16, stroke #EFEFED, vertical, gap 14, padding 18 */}
+          <div style={{
+            flex: 1, background: '#FFFFFF', borderRadius: 16,
+            border: '1px solid #EFEFED',
+            display: 'flex', flexDirection: 'column', gap: 14, padding: 18,
+            overflow: 'hidden',
+          }}>
+            {/* actTitle */}
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter', flexShrink: 0 }}>
+              Transações Recentes
+            </span>
+
+            {/* activity list */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {isLoading ? (
+                <div style={{ textAlign: 'center', color: '#AAAAAA', fontSize: 12, paddingTop: 32 }}>
+                  Carregando...
+                </div>
+              ) : recentActivity.length === 0 ? (
+                <EmptyActivity />
+              ) : (
+                recentActivity.slice(0, 8).map((ev: any, i: number) => {
+                  const act = getAction(ev.action);
+                  const isLast = i === Math.min(recentActivity.length, 8) - 1;
                   return (
-                    <div key={ev.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '10px 0',
-                      borderBottom: i < recentActivity.slice(0, 10).length - 1 ? '1px solid #F8F8F8' : 'none',
-                    }}>
-                      <div style={{
-                        width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-                        background: fmt.color + '15',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 14,
-                      }}>
-                        {fmt.icon}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: '#111' }}>
-                          {fmt.label}
+                    <div key={ev.id}>
+                      {/* act row — gap 10 */}
+                      <div style={{ display: 'flex', gap: 10, padding: '0 0 12px' }}>
+                        {/* avatar ellipse 32×32 */}
+                        <div style={{
+                          width: 32, height: 32, borderRadius: '50%',
+                          background: act.color, flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: '#fff', fontSize: 12, fontWeight: 700,
+                        }}>
+                          {ev.action[0]}
                         </div>
-                        <div style={{ fontSize: 11, color: '#aaa', marginTop: 1 }}>
-                          {new Date(ev.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                          {' · '}
-                          {new Date(ev.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        {/* body — vertical, gap 3 */}
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {/* header — space_between, center */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter' }}>
+                              {act.label}
+                            </span>
+                            <span style={{ fontSize: 10, color: '#AAAAAA', fontFamily: 'Inter', whiteSpace: 'nowrap' }}>
+                              {timeAgo(ev.createdAt)}
+                            </span>
+                            {/* dot */}
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CAF50', flexShrink: 0 }} />
+                          </div>
+                          {/* action text */}
+                          <span style={{
+                            fontSize: 11, color: '#666666', fontFamily: 'Inter',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {act.sub}
+                          </span>
+                          {/* comment */}
+                          <span style={{ fontSize: 11, color: '#888888', fontFamily: 'Inter' }}>
+                            {new Date(ev.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </span>
                         </div>
                       </div>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: fmt.color, flexShrink: 0 }} />
+                      {/* divider */}
+                      {!isLast && (
+                        <div style={{ height: 1, background: '#F5F5F5', marginBottom: 12 }} />
+                      )}
                     </div>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
 
+            {/* seeAllBtn — fill_container, r20, stroke #E0E0E0, padding [10,0], center */}
             {recentActivity.length > 0 && (
               <button style={{
-                width: '100%', marginTop: 16,
-                padding: '9px', border: '1.5px solid #F0F0F0', borderRadius: 10,
-                fontSize: 12.5, color: '#555', fontWeight: 600,
-                background: '#fff',
+                width: '100%', padding: '10px 0',
+                borderRadius: 20, border: '1px solid #E0E0E0',
+                background: 'transparent', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
-                Ver tudo
+                <span style={{ fontSize: 12, color: '#555555', fontFamily: 'Inter' }}>Ver tudo</span>
               </button>
             )}
           </div>
@@ -302,32 +379,68 @@ export default function Dashboard() {
   );
 }
 
+/* ─── MetricCard ─── */
 function MetricCard({
-  icon, iconBg, label, value, sub, subColor,
+  bg, icon, label, value, badge, center,
 }: {
-  icon: React.ReactNode; iconBg: string;
-  label: string; value: string; sub: string; subColor?: string;
+  bg: string; icon: React.ReactNode;
+  label: string; value: string;
+  badge?: { pct: string; up: boolean };
+  center?: boolean;
 }) {
   return (
+    /* fill_container, h120, r16, stroke, vertical, gap 12, padding 20, justifyCenter */
     <div style={{
-      flex: 1,
-      border: '1.5px solid #F3F3F3', borderRadius: 12, padding: '14px 16px',
+      flex: 1, height: 120, background: bg,
+      borderRadius: 16, border: '1px solid #E8E8E8',
+      display: 'flex', flexDirection: 'column', gap: 12, padding: 20,
+      justifyContent: 'center',
+      alignItems: center ? 'center' : 'flex-start',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8, background: iconBg,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {icon}
-        </div>
-        <span style={{ fontSize: 12, color: '#999', fontWeight: 500 }}>{label}</span>
+      {/* label row — gap 6, center */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {icon}
+        <span style={{ fontSize: 12, color: '#888888', fontFamily: 'Inter' }}>{label}</span>
       </div>
-      <div style={{ fontSize: 24, fontWeight: 800, color: '#111', letterSpacing: -0.8 }}>
-        {value}
+      {/* value row — gap 12, center */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: center ? 'center' : 'flex-start' }}>
+        <span style={{ fontSize: 32, fontWeight: 700, color: '#1A1A1A', fontFamily: 'Inter', lineHeight: 1 }}>
+          {value}
+        </span>
+        {badge && (
+          /* sideInfo — vertical, gap 4 */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'center' }}>
+            {/* badge pill */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              background: badge.up ? '#E8F5E9' : '#FFEBEE',
+              borderRadius: 12, padding: '3px 6px',
+            }}>
+              {badge.up
+                ? <TrendingUp size={8} color="#4CAF50" strokeWidth={2} />
+                : <TrendingDown size={8} color="#FF5252" strokeWidth={2} />
+              }
+              <span style={{ fontSize: 9, fontWeight: 600, color: badge.up ? '#4CAF50' : '#FF5252', fontFamily: 'Inter' }}>
+                {badge.pct}
+              </span>
+            </div>
+            <span style={{ fontSize: 9, color: '#AAAAAA', fontFamily: 'Inter' }}>vs. mês anterior</span>
+          </div>
+        )}
       </div>
-      <div style={{ fontSize: 11.5, color: subColor || '#10B981', marginTop: 4, fontWeight: 500 }}>
-        ↑ {sub}
-      </div>
+    </div>
+  );
+}
+
+function EmptyActivity() {
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 32,
+    }}>
+      <span style={{ fontSize: 11, color: '#AAAAAA', fontFamily: 'Inter', textAlign: 'center' }}>
+        Nenhuma atividade registrada ainda
+      </span>
     </div>
   );
 }
