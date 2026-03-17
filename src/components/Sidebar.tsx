@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, Users, Megaphone, Zap, BarChart2,
   Plug, CreditCard, HelpCircle, Settings,
-  Eye, Settings2, ChevronDown, LayoutTemplate,
+  Eye, Settings2, ChevronDown, PanelLeftClose,
   MessageCircle, Moon, Sun,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -65,7 +65,7 @@ export default function Sidebar() {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0,
         }}>
-          <LayoutTemplate size={14} color="#888888" />
+          <PanelLeftClose size={14} color="#888888" />
         </button>
       </div>
 
