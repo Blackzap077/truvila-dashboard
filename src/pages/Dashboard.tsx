@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
-import { Bell, Search, Plus, TrendingUp, MessageSquare, Users } from 'lucide-react';
+import { Bell, Search, TrendingUp, MessageSquare, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { userApi } from '../api/client';
 import Layout from '../components/Layout';
@@ -62,69 +62,77 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      {/* Topbar */}
+      {/* Topbar — padding [18,24] space_between, exato do .pen */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 16,
-        padding: '20px 24px', borderBottom: '1px solid #F3F3F3',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '18px 24px',
+        borderRadius: '16px 16px 0 0',
+        borderBottom: '1px solid #F0F0F0',
+        background: '#fff',
+        flexShrink: 0,
       }}>
-        <div style={{ flex: 1 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, color: '#111', letterSpacing: -0.3 }}>
-            Bem-vindo de volta, {firstName}!
-          </h2>
-          <p style={{ fontSize: 12.5, color: '#999', marginTop: 2 }}>
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
-          </p>
-        </div>
-
-        {/* Search */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: '#F5F5F5', borderRadius: 20, padding: '8px 14px',
-          width: 200,
+        {/* pageTitle */}
+        <span style={{
+          fontSize: 22, fontWeight: 700, color: '#1A1A1A',
+          fontFamily: 'Inter', letterSpacing: -0.3,
         }}>
-          <Search size={14} color="#bbb" />
-          <input
-            placeholder="Buscar..."
-            style={{ border: 'none', background: 'transparent', fontSize: 13, color: '#111', width: '100%' }}
-          />
-        </div>
+          Bem-vindo de volta, {firstName}!
+        </span>
 
-        {/* Nova Campanha button */}
-        <button style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '9px 16px',
-          background: 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)',
-          color: '#fff', borderRadius: 20,
-          fontSize: 13, fontWeight: 600,
-          boxShadow: '0 2px 8px rgba(232,69,10,0.3)',
-        }}>
-          <Plus size={14} />
-          Nova Campanha
-        </button>
+        {/* topRight — gap 12, alignItems center */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
 
-        {/* Bell */}
-        <div style={{
-          position: 'relative', width: 36, height: 36,
-          background: '#F5F5F5', borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer',
-        }}>
-          <Bell size={16} color="#555" />
-          <span style={{
-            position: 'absolute', top: 6, right: 6,
-            width: 8, height: 8, background: '#E8450A', borderRadius: '50%',
-            border: '2px solid #fff',
-          }} />
-        </div>
+          {/* searchBox — width 200, fill #fff, cornerRadius 20, gap 8, padding [10,16] */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            width: 200, background: '#FFFFFF',
+            borderRadius: 20, padding: '10px 16px',
+            border: '1px solid #F0F0EE',
+          }}>
+            <Search size={14} color="#AAAAAA" strokeWidth={1.8} />
+            <input
+              placeholder="Buscar algo..."
+              style={{
+                border: 'none', background: 'transparent',
+                fontSize: 12, color: '#BBBBBB', width: '100%',
+                fontFamily: 'Inter',
+              }}
+            />
+          </div>
 
-        {/* Avatar */}
-        <div style={{
-          width: 36, height: 36, borderRadius: '50%',
-          background: '#E8450A',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-        }}>
-          {user?.name?.[0]?.toUpperCase() || 'U'}
+          {/* createBtn — gradient laranja, cornerRadius 10, padding [10,20] */}
+          <button style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 20px',
+            background: 'linear-gradient(157deg, #ff917b 0%, #f9755b 17%, #ff5c3c 31%, #ff4e2b 100%)',
+            color: '#fff', borderRadius: 10,
+            fontSize: 13, fontWeight: 600, fontFamily: 'Inter',
+            border: 'none', cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}>
+            Nova Campanha
+          </button>
+
+          {/* bellBtn — width 36, height 36, fill #fff, cornerRadius 18 */}
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: '#FFFFFF', border: '1px solid #F0F0EE',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', flexShrink: 0,
+          }}>
+            <Bell size={16} color="#888888" strokeWidth={1.8} />
+          </div>
+
+          {/* avatarBox — ellipse 36×36, fill #C4B5A5 */}
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: '#C4B5A5',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontWeight: 700, fontSize: 14,
+            fontFamily: 'Inter', cursor: 'pointer', flexShrink: 0,
+          }}>
+            {user?.name?.[0]?.toUpperCase() || 'U'}
+          </div>
         </div>
       </div>
 
