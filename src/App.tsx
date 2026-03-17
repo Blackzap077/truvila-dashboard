@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import Integracoes from './pages/Integracoes';
 import Placeholder from './pages/Placeholder';
 
 const queryClient = new QueryClient({
@@ -31,7 +32,7 @@ function AppRoutes() {
       <Route path="/campanhas" element={<PrivateRoute><Placeholder title="Campanhas" /></PrivateRoute>} />
       <Route path="/automacoes" element={<PrivateRoute><Placeholder title="Automações" /></PrivateRoute>} />
       <Route path="/relatorios" element={<PrivateRoute><Placeholder title="Relatórios" /></PrivateRoute>} />
-      <Route path="/integracoes" element={<PrivateRoute><Placeholder title="Integrações" /></PrivateRoute>} />
+      <Route path="/integracoes" element={<PrivateRoute><Integracoes /></PrivateRoute>} />
       <Route path="/financeiro" element={<PrivateRoute><Placeholder title="Financeiro" /></PrivateRoute>} />
       <Route path="/suporte" element={<PrivateRoute><Placeholder title="Suporte" /></PrivateRoute>} />
       <Route path="/configuracoes" element={<PrivateRoute><Placeholder title="Configurações" /></PrivateRoute>} />

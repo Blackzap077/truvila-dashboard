@@ -35,3 +35,9 @@ export const userApi = {
   me: () => api.get('/users/me'),
   stats: () => api.get('/users/me/stats'),
 };
+
+export const smsRoutesApi = {
+  list: () => api.get('/sms-routes'),
+  updateShortcodes: (key: string, shortcodes: string[], defaultShortcode: string) =>
+    api.patch(`/sms-routes/${key}/shortcodes`, { shortcodes, defaultShortcode }),
+};
