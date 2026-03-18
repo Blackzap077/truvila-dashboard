@@ -3,7 +3,7 @@ import {
   LayoutGrid, Users, Megaphone, Zap, BarChart2,
   Plug, CreditCard, HelpCircle, Settings,
   Eye, Settings2, ChevronDown, PanelLeftClose, PanelLeftOpen,
-  MessageCircle, Moon, Sun,
+  MessageCircle, Moon, Sun, Send,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -110,6 +110,7 @@ export default function Sidebar() {
             </div>
           }
         />
+        <NavItem to="/disparos" collapsed={collapsed} icon={<Send size={14} />} label="Disparos" />
         <NavItem to="/automacoes" collapsed={collapsed} icon={<Zap size={14} />} label="Automações"
           rightExpanded={<ChevronDown size={14} color="#BBBBBB" />}
         />

@@ -41,3 +41,12 @@ export const smsRoutesApi = {
   updateShortcodes: (key: string, shortcodes: string[], defaultShortcode: string) =>
     api.patch(`/sms-routes/${key}/shortcodes`, { shortcodes, defaultShortcode }),
 };
+
+export const smsApi = {
+  send: (data: { to: string; message: string; shortcode?: string; token?: string }) =>
+    api.post('/sms/send', data),
+};
+
+export const webhookApi = {
+  events: () => api.get('/webhook/events'),
+};

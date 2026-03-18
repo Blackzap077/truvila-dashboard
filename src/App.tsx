@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Integracoes from './pages/Integracoes';
+import Disparos from './pages/Disparos';
 import Placeholder from './pages/Placeholder';
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
       <Route path="/contatos" element={<PrivateRoute><Placeholder title="Contatos" /></PrivateRoute>} />
       <Route path="/campanhas" element={<PrivateRoute><Placeholder title="Campanhas" /></PrivateRoute>} />
+      <Route path="/disparos" element={<PrivateRoute><Disparos /></PrivateRoute>} />
       <Route path="/automacoes" element={<PrivateRoute><Placeholder title="Automações" /></PrivateRoute>} />
       <Route path="/relatorios" element={<PrivateRoute><Placeholder title="Relatórios" /></PrivateRoute>} />
       <Route path="/integracoes" element={<PrivateRoute><Integracoes /></PrivateRoute>} />
