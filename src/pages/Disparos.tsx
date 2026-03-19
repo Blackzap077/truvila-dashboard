@@ -1,11 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Send, Upload, Download, RefreshCw, CheckCircle2, XCircle,
   Clock, AlertCircle, Hash, Users, FileText, Zap, ChevronDown,
 } from 'lucide-react';
-import { api, webhookApi } from '../api/client';
+import { api, webhookApi, smsRoutesApi } from '../api/client';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
+
+interface SmsRoute {
+  id: string;
+  key: string;
+  name: string;
+  shortcodes: string[];
+  defaultShortcode: string;
+  isActive: boolean;
+}
 
 interface SmsResult {
   number: string;
@@ -19,8 +29,8 @@ interface SmsResult {
 
 interface WebhookEvent {
   messageId: string;
-  status: string;       // coluna "event" no banco (statusCode)
-  statusLabel: string;  // coluna "status" no banco
+  status: string;
+  statusLabel: string;
   to: string;
   updatedAt: string;
 }
@@ -62,12 +72,12 @@ function statusIcon(status: SmsResult['status']) {
 
 function mapWebhookStatus(raw: string): SmsResult['status'] {
   switch (raw.toUpperCase()) {
-    case 'DELIVRD':   case 'ENTREGUE':   return 'entregue';
-    case 'ENROUTE':   case 'ACCEPTD':    return 'enviado';
-    case 'UNDELIV':   case 'REJECTD':    return 'invalido';
-    case 'EXPIRED':                       return 'expirado';
-    case 'DELETED':   case 'FALHA':      return 'falha';
-    default:                              return 'enviado';
+    case 'DELIVRD':  case 'ENTREGUE':  return 'entregue';
+    case 'ENROUTE':  case 'ACCEPTD':   return 'enviado';
+    case 'UNDELIV':  case 'REJECTD':   return 'invalido';
+    case 'EXPIRED':                     return 'expirado';
+    case 'DELETED':  case 'FALHA':     return 'falha';
+    default:                            return 'enviado';
   }
 }
 
@@ -89,32 +99,55 @@ function exportCSV(results: SmsResult[]) {
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 export default function Disparos() {
-  // Config
+  // Rotas do backend
+  const { data: routes = [], isLoading: loadingRoutes } = useQuery<SmsRoute[]>({
+    queryKey: ['sms-routes'],
+    queryFn: () => smsRoutesApi.list().then(r => r.data),
+  });
+
+  // Config — inicializa quando rotas carregam
+  const [rotaKey, setRotaKey]       = useState('');
   const [shortcode, setShortcode]   = useState('');
-  const [rota, setRota]             = useState<'blk' | 'bet' | 'white'>('blk');
   const [mensagem, setMensagem]     = useState('');
   const [rawNumbers, setRawNumbers] = useState('');
   const [batchSize, setBatchSize]   = useState(10);
   const [delay, setDelay]           = useState(500);
 
-  // Estado do disparo
-  const [results, setResults]       = useState<SmsResult[]>([]);
-  const [running, setRunning]       = useState(false);
-  const [done, setDone]             = useState(false);
-  const abortRef                    = useRef(false);
-  const intervalRef                 = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Inicializa rota e shortcode quando rotas chegam
+  useEffect(() => {
+    if (routes.length > 0 && !rotaKey) {
+      setRotaKey(routes[0].key);
+      setShortcode(routes[0].defaultShortcode);
+    }
+  }, [routes, rotaKey]);
 
-  // Números parseados
+  // Rota selecionada
+  const rotaSelecionada = routes.find(r => r.key === rotaKey) ?? null;
+
+  function handleRotaChange(key: string) {
+    setRotaKey(key);
+    const r = routes.find(r => r.key === key);
+    setShortcode(r?.defaultShortcode ?? r?.shortcodes[0] ?? '');
+  }
+
+  // Estado do disparo
+  const [results, setResults]   = useState<SmsResult[]>([]);
+  const [running, setRunning]   = useState(false);
+  const [done, setDone]         = useState(false);
+  const abortRef                = useRef(false);
+  const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Números
   const numbers = parseNumbers(rawNumbers);
   const total   = numbers.length;
 
-  // Contadores derivados
+  // Contadores
   const sent      = results.filter(r => r.status !== 'pendente' && r.status !== 'enviando').length;
   const delivered = results.filter(r => r.status === 'entregue').length;
   const failed    = results.filter(r => r.status === 'falha' || r.status === 'invalido').length;
   const pending   = results.filter(r => r.status === 'pendente').length;
 
-  // ── Polling de webhooks ───────────────────────────────────────────────────
+  // ── Polling webhooks ──────────────────────────────────────────────────────
   const pollWebhooks = useCallback(async () => {
     try {
       const res = await webhookApi.events();
@@ -124,45 +157,33 @@ export default function Disparos() {
         const ev = events.find(e => e.messageId === r.messageId);
         if (!ev) return r;
         const newStatus = mapWebhookStatus(ev.status);
-        // só atualiza se status mudou
         if (newStatus === r.status) return r;
-        return {
-          ...r,
-          status: newStatus,
-          statusLabel: ev.statusLabel ?? r.statusLabel,
-          updatedAt: ev.updatedAt ?? new Date().toISOString(),
-        };
+        return { ...r, status: newStatus, statusLabel: ev.statusLabel ?? r.statusLabel, updatedAt: ev.updatedAt ?? new Date().toISOString() };
       }));
-    } catch {
-      // silencioso
-    }
+    } catch { /* silencioso */ }
   }, []);
 
   useEffect(() => {
     if (running || (done && results.some(r => r.status === 'enviado'))) {
       intervalRef.current = setInterval(pollWebhooks, 3000);
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [running, done, results, pollWebhooks]);
 
   // ── Disparo ───────────────────────────────────────────────────────────────
   async function startDisparo() {
-    if (!shortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
+    if (!rotaKey || !shortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
 
     abortRef.current = false;
     setDone(false);
     setRunning(true);
 
-    // Inicializa todos como pendente
     const initial: SmsResult[] = numbers.map(n => ({
       number: n, messageId: null, status: 'pendente',
       statusLabel: 'Aguardando', sentAt: null, updatedAt: null, error: null,
     }));
     setResults(initial);
 
-    // Processa em lotes
     for (let i = 0; i < numbers.length; i += batchSize) {
       if (abortRef.current) break;
       const batch = numbers.slice(i, i + batchSize);
@@ -171,7 +192,7 @@ export default function Disparos() {
         const idx = i + bi;
         setResults(prev => prev.map((r, j) => j === idx ? { ...r, status: 'enviando', statusLabel: 'Enviando...' } : r));
         try {
-          const res = await api.post(`/sms/send?route=${rota}`, {
+          const res = await api.post(`/sms/send?route=${rotaKey}`, {
             to: [number],
             from: shortcode,
             message: mensagem,
@@ -192,7 +213,6 @@ export default function Disparos() {
         }
       }));
 
-      // delay entre lotes
       if (i + batchSize < numbers.length && delay > 0) {
         await new Promise(res => setTimeout(res, delay));
       }
@@ -219,28 +239,27 @@ export default function Disparos() {
     background: '#fff', borderRadius: 12,
     border: '1.5px solid #F0F0EE', padding: '20px 24px',
   };
-
-  const label: React.CSSProperties = {
+  const lbl: React.CSSProperties = {
     fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6,
     textTransform: 'uppercase', letterSpacing: 0.5,
   };
-
-  const input: React.CSSProperties = {
+  const inp: React.CSSProperties = {
     width: '100%', padding: '10px 12px', borderRadius: 8,
     border: '1.5px solid #EBEBEB', fontSize: 13, color: '#1A1A1A',
     background: '#FAFAFA', outline: 'none', boxSizing: 'border-box',
     fontFamily: 'Inter, sans-serif',
   };
-
   const statCard = (color: string): React.CSSProperties => ({
     flex: 1, background: '#fff', borderRadius: 10,
     border: `1.5px solid ${color}22`, padding: '14px 16px',
     display: 'flex', flexDirection: 'column', gap: 4,
   });
 
+  const canDispatch = !!rotaKey && !!shortcode.trim() && !!mensagem.trim() && total > 0;
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 900, fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ padding: '28px 32px', maxWidth: 920, fontFamily: 'Inter, sans-serif' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -253,56 +272,105 @@ export default function Disparos() {
           </p>
         </div>
         {results.length > 0 && (
-          <button
-            onClick={() => exportCSV(results)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '9px 16px', borderRadius: 8,
-              border: '1.5px solid #E0E0E0', background: '#FAFAFA',
-              fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer',
-            }}
-          >
+          <button onClick={() => exportCSV(results)} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '9px 16px', borderRadius: 8,
+            border: '1.5px solid #E0E0E0', background: '#FAFAFA',
+            fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer',
+          }}>
             <Download size={14} /> Exportar CSV
           </button>
         )}
       </div>
 
-      {/* Config cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      {/* ── Seleção de Rota (cards clicáveis) ── */}
+      <div style={{ ...card, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Zap size={15} color="#E8450A" />
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Rota de envio</span>
+          {loadingRoutes && <RefreshCw size={13} color="#888" style={{ animation: 'spin 1s linear infinite' }} />}
+        </div>
 
-        {/* Rota + Shortcode */}
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Zap size={15} color="#E8450A" />
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Configuração</span>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <div style={label}>Rota de envio</div>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={rota}
-                onChange={e => setRota(e.target.value as 'blk' | 'bet' | 'white')}
+        {routes.length === 0 && !loadingRoutes && (
+          <div style={{ fontSize: 13, color: '#888' }}>Nenhuma rota encontrada. Configure em Integrações.</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {routes.map(route => {
+            const sel = rotaKey === route.key;
+            return (
+              <button
+                key={route.key}
+                onClick={() => handleRotaChange(route.key)}
                 disabled={running}
-                style={{ ...input, appearance: 'none', paddingRight: 32, cursor: 'pointer' }}
+                style={{
+                  flex: 1, minWidth: 160,
+                  padding: '14px 18px', borderRadius: 10, textAlign: 'left',
+                  border: sel ? '1.5px solid #E8450A' : '1.5px solid #EBEBEB',
+                  background: sel ? '#FFF4F0' : '#FAFAFA',
+                  cursor: running ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                }}
               >
-                <option value="blk">ALL Brazil (blk)</option>
-                <option value="bet">Cassino Direct (bet)</option>
-                <option value="white">White Label (white)</option>
-              </select>
-              <ChevronDown size={14} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-            </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: sel ? '#E8450A' : '#1A1A1A', marginBottom: 4 }}>
+                  {route.name}
+                </div>
+                <div style={{ fontSize: 11, color: '#888', fontFamily: 'monospace' }}>
+                  key: {route.key}
+                </div>
+                <div style={{ fontSize: 11, color: '#AAAAAA', marginTop: 2 }}>
+                  {route.shortcodes.length} shortcode{route.shortcodes.length !== 1 ? 's' : ''}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Shortcode (bolinha clicável por rota) ── */}
+      {rotaSelecionada && (
+        <div style={{ ...card, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Hash size={15} color="#E8450A" />
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Shortcode (Remetente)</span>
+            <span style={{ fontSize: 12, color: '#888' }}>— rota <strong>{rotaSelecionada.name}</strong></span>
           </div>
-          <div>
-            <div style={label}>Shortcode (Remetente)</div>
-            <input
-              style={{ ...input, fontFamily: 'monospace' }}
-              placeholder="Ex: 9100663"
-              value={shortcode}
-              onChange={e => setShortcode(e.target.value)}
-              disabled={running}
-            />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {rotaSelecionada.shortcodes.map(sc => {
+              const sel = shortcode === sc;
+              return (
+                <button
+                  key={sc}
+                  onClick={() => setShortcode(sc)}
+                  disabled={running}
+                  style={{
+                    padding: '10px 18px', borderRadius: 8,
+                    border: sel ? '1.5px solid #E8450A' : '1.5px solid #EBEBEB',
+                    background: sel ? '#FFF4F0' : '#FAFAFA',
+                    fontSize: 13, fontWeight: sel ? 700 : 400,
+                    color: sel ? '#E8450A' : '#444',
+                    fontFamily: 'monospace',
+                    cursor: running ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}
+                >
+                  {sc}
+                  {sc === rotaSelecionada.defaultShortcode && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, background: sel ? '#E8450A' : '#E0E0E0',
+                      color: sel ? '#fff' : '#666', borderRadius: 20, padding: '2px 7px',
+                    }}>padrão</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
+      )}
+
+      {/* ── Mensagem + Números ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
         {/* Mensagem */}
         <div style={card}>
@@ -310,22 +378,18 @@ export default function Disparos() {
             <FileText size={15} color="#E8450A" />
             <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Mensagem</span>
           </div>
-          <div style={label}>Texto do SMS</div>
+          <div style={lbl}>Texto do SMS</div>
           <textarea
-            style={{ ...input, height: 90, resize: 'vertical', lineHeight: 1.5 }}
+            style={{ ...inp, height: 110, resize: 'vertical', lineHeight: 1.5 }}
             placeholder="Digite o texto que será enviado..."
             value={mensagem}
             onChange={e => setMensagem(e.target.value)}
             disabled={running}
           />
-          <div style={{ marginTop: 6, fontSize: 11, color: '#AAAAAA', textAlign: 'right' }}>
+          <div style={{ marginTop: 6, fontSize: 11, color: mensagem.length > 160 ? '#F44336' : '#AAAAAA', textAlign: 'right' }}>
             {mensagem.length} / 160 chars
           </div>
         </div>
-      </div>
-
-      {/* Números + Opções */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, marginBottom: 16 }}>
 
         {/* Números */}
         <div style={card}>
@@ -335,209 +399,160 @@ export default function Disparos() {
               <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Números</span>
             </div>
             {total > 0 && (
-              <span style={{
-                background: '#E8450A', color: '#fff', borderRadius: 20,
-                padding: '2px 10px', fontSize: 12, fontWeight: 600,
-              }}>{total} número{total !== 1 ? 's' : ''}</span>
+              <span style={{ background: '#E8450A', color: '#fff', borderRadius: 20, padding: '2px 10px', fontSize: 12, fontWeight: 600 }}>
+                {total} número{total !== 1 ? 's' : ''}
+              </span>
             )}
           </div>
-          <div style={label}>Cole os números (um por linha, ou separados por vírgula/espaço)</div>
+          <div style={lbl}>Um por linha, vírgula ou espaço</div>
           <textarea
-            style={{ ...input, height: 140, resize: 'vertical', lineHeight: 1.6, fontFamily: 'monospace', fontSize: 12 }}
-            placeholder={'5511911420402\n5521987654321\n5531999998888\n...'}
+            style={{ ...inp, height: 110, resize: 'vertical', lineHeight: 1.6, fontFamily: 'monospace', fontSize: 12 }}
+            placeholder={'5511911420402\n5521987654321\n5531999998888'}
             value={rawNumbers}
             onChange={e => setRawNumbers(e.target.value)}
             disabled={running}
           />
           {total > 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#4CAF50' }}>
               ✓ {total} número{total !== 1 ? 's' : ''} válido{total !== 1 ? 's' : ''} detectado{total !== 1 ? 's' : ''}
             </div>
           )}
         </div>
+      </div>
 
-        {/* Opções de disparo */}
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Hash size={15} color="#E8450A" />
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Opções</span>
-          </div>
+      {/* ── Opções + Botão ── */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, alignItems: 'flex-end', flexWrap: 'wrap' }}>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={label}>Disparos simultâneos</div>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={batchSize}
-                onChange={e => setBatchSize(Number(e.target.value))}
-                disabled={running}
-                style={{ ...input, appearance: 'none', paddingRight: 32, cursor: 'pointer' }}
-              >
-                {[1, 5, 10, 20, 50, 100].map(n => (
-                  <option key={n} value={n}>{n} por vez</option>
-                ))}
-              </select>
-              <ChevronDown size={14} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-            </div>
+        {/* Lotes */}
+        <div style={{ minWidth: 160 }}>
+          <div style={lbl}>Disparos simultâneos</div>
+          <div style={{ position: 'relative' }}>
+            <select value={batchSize} onChange={e => setBatchSize(Number(e.target.value))} disabled={running}
+              style={{ ...inp, appearance: 'none', paddingRight: 32, cursor: 'pointer', width: 'auto', minWidth: 160 }}>
+              {[1, 5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n} por vez</option>)}
+            </select>
+            <ChevronDown size={13} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
           </div>
+        </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={label}>Intervalo entre lotes (ms)</div>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={delay}
-                onChange={e => setDelay(Number(e.target.value))}
-                disabled={running}
-                style={{ ...input, appearance: 'none', paddingRight: 32, cursor: 'pointer' }}
-              >
-                {[0, 200, 500, 1000, 2000, 5000].map(n => (
-                  <option key={n} value={n}>{n === 0 ? 'Sem intervalo' : `${n}ms`}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-            </div>
+        {/* Intervalo */}
+        <div style={{ minWidth: 160 }}>
+          <div style={lbl}>Intervalo entre lotes</div>
+          <div style={{ position: 'relative' }}>
+            <select value={delay} onChange={e => setDelay(Number(e.target.value))} disabled={running}
+              style={{ ...inp, appearance: 'none', paddingRight: 32, cursor: 'pointer', width: 'auto', minWidth: 160 }}>
+              {[0, 200, 500, 1000, 2000, 5000].map(n => <option key={n} value={n}>{n === 0 ? 'Sem intervalo' : `${n}ms`}</option>)}
+            </select>
+            <ChevronDown size={13} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
           </div>
+        </div>
 
-          <div style={{ marginTop: 'auto', paddingTop: 8 }}>
-            <div style={label}>Estimativa</div>
-            <div style={{ fontSize: 12, color: '#888', lineHeight: 1.6 }}>
-              {total > 0
-                ? `~${Math.ceil(total / batchSize)} lotes × ${delay}ms = ~${((Math.ceil(total / batchSize) * delay) / 1000).toFixed(1)}s`
-                : '—'
-              }
-            </div>
+        {/* Estimativa */}
+        {total > 0 && (
+          <div style={{ fontSize: 12, color: '#888', paddingBottom: 10 }}>
+            ~{Math.ceil(total / batchSize)} lotes · ~{((Math.ceil(total / batchSize) * delay) / 1000).toFixed(1)}s
           </div>
+        )}
+
+        {/* Botões */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto', paddingBottom: 2 }}>
+          {!running && !done && (
+            <button onClick={startDisparo} disabled={!canDispatch} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '11px 28px', borderRadius: 10,
+              background: canDispatch ? 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)' : '#E0E0E0',
+              color: '#fff', border: 'none', fontSize: 14, fontWeight: 600,
+              cursor: canDispatch ? 'pointer' : 'not-allowed',
+            }}>
+              <Send size={15} /> Disparar {total > 0 ? `${total} SMS` : ''}
+            </button>
+          )}
+          {running && (
+            <>
+              <div style={{ fontSize: 13, color: '#888', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                Enviando {sent}/{total}
+              </div>
+              <button onClick={stopDisparo} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '11px 22px', borderRadius: 10,
+                background: '#F44336', color: '#fff', border: 'none',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}>
+                <XCircle size={14} /> Parar
+              </button>
+            </>
+          )}
+          {done && (
+            <>
+              <button onClick={resetDisparo} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '11px 22px', borderRadius: 10,
+                background: 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)',
+                color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}>
+                <Upload size={14} /> Novo disparo
+              </button>
+              <button onClick={pollWebhooks} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '11px 18px', borderRadius: 10,
+                border: '1.5px solid #E0E0E0', background: '#FAFAFA',
+                fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer',
+              }}>
+                <RefreshCw size={13} /> Atualizar status
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Botão de ação */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24, alignItems: 'center' }}>
-        {!running && !done && (
-          <button
-            onClick={startDisparo}
-            disabled={!shortcode.trim() || !mensagem.trim() || total === 0}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '12px 28px', borderRadius: 10,
-              background: (!shortcode.trim() || !mensagem.trim() || total === 0)
-                ? '#E0E0E0'
-                : 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)',
-              color: '#fff', border: 'none',
-              fontSize: 14, fontWeight: 600, cursor: (!token.trim() || !mensagem.trim() || total === 0) ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <Send size={15} /> Disparar {total > 0 ? `${total} SMS` : ''}
-          </button>
-        )}
-
-        {running && (
-          <button
-            onClick={stopDisparo}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '12px 28px', borderRadius: 10,
-              background: '#F44336', color: '#fff',
-              border: 'none', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <XCircle size={15} /> Parar disparo
-          </button>
-        )}
-
-        {done && (
-          <>
-            <button
-              onClick={resetDisparo}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '12px 28px', borderRadius: 10,
-                background: 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)',
-                color: '#fff', border: 'none',
-                fontSize: 14, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              <Upload size={15} /> Novo disparo
-            </button>
-            <button
-              onClick={pollWebhooks}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '12px 20px', borderRadius: 10,
-                border: '1.5px solid #E0E0E0', background: '#FAFAFA',
-                fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer',
-              }}
-            >
-              <RefreshCw size={14} /> Atualizar status
-            </button>
-          </>
-        )}
-
-        {running && (
-          <div style={{ fontSize: 13, color: '#888', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
-            Enviando... {sent}/{total}
-          </div>
-        )}
-      </div>
-
-      {/* Stats */}
+      {/* ── Stats + Tabela ── */}
       {results.length > 0 && (
         <>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-            <div style={statCard('#888888')}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.4 }}>Total</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#1A1A1A' }}>{total}</div>
-            </div>
-            <div style={statCard('#4CAF50')}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#4CAF50', textTransform: 'uppercase', letterSpacing: 0.4 }}>Entregues</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#4CAF50' }}>{delivered}</div>
-            </div>
-            <div style={statCard('#2196F3')}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#2196F3', textTransform: 'uppercase', letterSpacing: 0.4 }}>Enviados</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#2196F3' }}>{sent - delivered - failed}</div>
-            </div>
-            <div style={statCard('#F44336')}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#F44336', textTransform: 'uppercase', letterSpacing: 0.4 }}>Falhas</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#F44336' }}>{failed}</div>
-            </div>
-            <div style={statCard('#AAAAAA')}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#AAAAAA', textTransform: 'uppercase', letterSpacing: 0.4 }}>Pendentes</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#AAAAAA' }}>{pending}</div>
-            </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            {[
+              { label: 'Total',     val: total,                       color: '#888888' },
+              { label: 'Entregues', val: delivered,                   color: '#4CAF50' },
+              { label: 'Enviados',  val: sent - delivered - failed,   color: '#2196F3' },
+              { label: 'Falhas',    val: failed,                      color: '#F44336' },
+              { label: 'Pendentes', val: pending,                     color: '#AAAAAA' },
+            ].map(({ label, val, color }) => (
+              <div key={label} style={statCard(color)}>
+                <div style={{ fontSize: 10, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: label === 'Total' ? '#1A1A1A' : color }}>{val}</div>
+              </div>
+            ))}
           </div>
 
           {/* Barra de progresso */}
-          {(running || done) && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ height: 6, background: '#F0F0EE', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${total > 0 ? (sent / total) * 100 : 0}%`,
-                  background: 'linear-gradient(90deg, #E8450A, #FF6B35)',
-                  borderRadius: 3,
-                  transition: 'width 0.3s ease',
-                }} />
-              </div>
-              <div style={{ fontSize: 11, color: '#888', marginTop: 4, textAlign: 'right' }}>
-                {total > 0 ? `${Math.round((sent / total) * 100)}%` : '0%'} processado
-              </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ height: 5, background: '#F0F0EE', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${total > 0 ? (sent / total) * 100 : 0}%`,
+                background: 'linear-gradient(90deg, #E8450A, #FF6B35)',
+                borderRadius: 3, transition: 'width 0.3s ease',
+              }} />
             </div>
-          )}
+            <div style={{ fontSize: 11, color: '#888', marginTop: 4, textAlign: 'right' }}>
+              {total > 0 ? `${Math.round((sent / total) * 100)}%` : '0%'} processado
+            </div>
+          </div>
 
-          {/* Tabela de resultados */}
+          {/* Tabela */}
           <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid #F0F0EE', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid #F0F0EE', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Resultados do disparo</span>
-              <span style={{ fontSize: 12, color: '#888' }}>Atualiza automaticamente via webhook</span>
+              <span style={{ fontSize: 12, color: '#888' }}>Atualiza via webhook a cada 3s</span>
             </div>
-
-            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#FAFAFA' }}>
                     {['Número', 'Message ID', 'Status', 'Enviado em', 'Atualizado em'].map(h => (
                       <th key={h} style={{
                         padding: '10px 16px', textAlign: 'left',
-                        fontSize: 11, fontWeight: 600, color: '#888888',
+                        fontSize: 11, fontWeight: 600, color: '#888',
                         textTransform: 'uppercase', letterSpacing: 0.4,
                         borderBottom: '1px solid #F0F0EE', whiteSpace: 'nowrap',
                       }}>{h}</th>
@@ -547,22 +562,14 @@ export default function Disparos() {
                 <tbody>
                   {results.map((r, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #F8F8F8' }}>
-                      <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: 'monospace', color: '#1A1A1A' }}>
-                        {r.number}
-                      </td>
-                      <td style={{ padding: '10px 16px', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>
-                        {r.messageId ?? '—'}
-                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 13, fontFamily: 'monospace', color: '#1A1A1A' }}>{r.number}</td>
+                      <td style={{ padding: '10px 16px', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>{r.messageId ?? '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {statusIcon(r.status)}
-                          <span style={{ fontSize: 12, fontWeight: 600, color: statusColor(r.status) }}>
-                            {r.statusLabel}
-                          </span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: statusColor(r.status) }}>{r.statusLabel}</span>
                         </div>
-                        {r.error && (
-                          <div style={{ fontSize: 11, color: '#F44336', marginTop: 2 }}>{r.error}</div>
-                        )}
+                        {r.error && <div style={{ fontSize: 11, color: '#F44336', marginTop: 2 }}>{r.error}</div>}
                       </td>
                       <td style={{ padding: '10px 16px', fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
                         {r.sentAt ? new Date(r.sentAt).toLocaleTimeString('pt-BR') : '—'}
@@ -581,8 +588,9 @@ export default function Disparos() {
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        textarea:focus, input:focus, select:focus { border-color: #E8450A !important; outline: none; }
+        textarea:focus, input:focus, select:focus { border-color: #E8450A !important; }
         input:disabled, textarea:disabled, select:disabled { opacity: 0.6; cursor: not-allowed; }
+        button:disabled { opacity: 0.6; }
       `}</style>
     </div>
   );
