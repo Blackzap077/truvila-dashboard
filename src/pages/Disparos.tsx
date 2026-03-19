@@ -201,9 +201,10 @@ export default function Disparos() {
             message: mensagem,
           });
           const data = res.data as Record<string, unknown>;
-          // Sintegrax pode retornar id, message_id, messageId, ou nested em data
-          const nested = (data?.data ?? data) as Record<string, unknown>;
-          const msgId = (nested?.id ?? nested?.message_id ?? nested?.messageId ?? null) as string | null;
+          // Sintegrax retorna: { data: [{ messageId, ... }] }
+          const arr = data?.data as Record<string, unknown>[] | undefined;
+          const first = arr?.[0] ?? data;
+          const msgId = (first?.messageId ?? first?.id ?? first?.message_id ?? null) as string | null;
           setResults(prev => prev.map((r, j) => j === idx ? {
             ...r, status: 'enviado', statusLabel: 'Enviado',
             messageId: msgId,
