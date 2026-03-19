@@ -29,7 +29,7 @@ interface SmsResult {
 
 interface WebhookEvent {
   messageId: string;
-  status: string;
+  statusCode: string;
   statusLabel: string;
   to: string;
   updatedAt: string;
@@ -136,6 +136,7 @@ export default function Disparos() {
   const [done, setDone]         = useState(false);
   const abortRef                = useRef(false);
   const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollUntilRef            = useRef<number>(0); // timestamp até quando continuar polling
 
   // Números
   const numbers = parseNumbers(rawNumbers);
@@ -156,7 +157,7 @@ export default function Disparos() {
         if (!r.messageId) return r;
         const ev = events.find(e => e.messageId === r.messageId);
         if (!ev) return r;
-        const newStatus = mapWebhookStatus(ev.status);
+        const newStatus = mapWebhookStatus(ev.statusCode);
         if (newStatus === r.status) return r;
         return { ...r, status: newStatus, statusLabel: ev.statusLabel ?? r.statusLabel, updatedAt: ev.updatedAt ?? new Date().toISOString() };
       }));
@@ -164,11 +165,13 @@ export default function Disparos() {
   }, []);
 
   useEffect(() => {
-    if (running || (done && results.some(r => r.status === 'enviado'))) {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    const shouldPoll = running || (done && Date.now() < pollUntilRef.current);
+    if (shouldPoll) {
       intervalRef.current = setInterval(pollWebhooks, 3000);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [running, done, results, pollWebhooks]);
+  }, [running, done, pollWebhooks]);
 
   // ── Disparo ───────────────────────────────────────────────────────────────
   async function startDisparo() {
@@ -198,9 +201,12 @@ export default function Disparos() {
             message: mensagem,
           });
           const data = res.data as Record<string, unknown>;
+          // Sintegrax pode retornar id, message_id, messageId, ou nested em data
+          const nested = (data?.data ?? data) as Record<string, unknown>;
+          const msgId = (nested?.id ?? nested?.message_id ?? nested?.messageId ?? null) as string | null;
           setResults(prev => prev.map((r, j) => j === idx ? {
             ...r, status: 'enviado', statusLabel: 'Enviado',
-            messageId: (data?.messageId ?? data?.id ?? null) as string | null,
+            messageId: msgId,
             sentAt: new Date().toISOString(),
           } : r));
         } catch (e: unknown) {
@@ -219,12 +225,14 @@ export default function Disparos() {
     }
 
     setRunning(false);
+    pollUntilRef.current = Date.now() + 5 * 60 * 1000; // polling por mais 5 minutos
     setDone(true);
   }
 
   function stopDisparo() {
     abortRef.current = true;
     setRunning(false);
+    pollUntilRef.current = Date.now() + 5 * 60 * 1000;
     setDone(true);
   }
 
