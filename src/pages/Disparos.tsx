@@ -106,23 +106,20 @@ export default function Disparos() {
   });
 
   // Config — inicializa quando rotas carregam
-  const [rotaKey, setRotaKey]       = useState('');
-  const [shortcode, setShortcode]   = useState('');
+  const [rotaKey, setRotaKey]       = useState(() => '');
+  const [shortcode, setShortcode]   = useState(() => '');
   const [mensagem, setMensagem]     = useState('');
   const [rawNumbers, setRawNumbers] = useState('');
   const [batchSize, setBatchSize]   = useState(10);
   const [delay, setDelay]           = useState(500);
 
-  // Inicializa rota e shortcode quando rotas chegam
-  useEffect(() => {
-    if (routes.length > 0 && !rotaKey) {
-      setRotaKey(routes[0].key);
-      setShortcode(routes[0].defaultShortcode);
-    }
-  }, [routes, rotaKey]);
+  // Inicializa rota e shortcode quando rotas chegam (sem setState em effect)
+  const firstRoute = routes[0];
+  const effectiveRotaKey  = rotaKey  || firstRoute?.key  || '';
+  const effectiveShortcode = shortcode || firstRoute?.defaultShortcode || '';
 
   // Rota selecionada
-  const rotaSelecionada = routes.find(r => r.key === rotaKey) ?? null;
+  const rotaSelecionada = routes.find(r => r.key === effectiveRotaKey) ?? null;
 
   function handleRotaChange(key: string) {
     setRotaKey(key);
@@ -185,7 +182,7 @@ export default function Disparos() {
 
   // ── Disparo ───────────────────────────────────────────────────────────────
   async function startDisparo() {
-    if (!rotaKey || !shortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
+    if (!effectiveRotaKey || !effectiveShortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
 
     abortRef.current = false;
     stopPolling();
@@ -207,9 +204,9 @@ export default function Disparos() {
         const idx = i + bi;
         setResults(prev => prev.map((r, j) => j === idx ? { ...r, status: 'enviando', statusLabel: 'Enviando...' } : r));
         try {
-          const res = await api.post(`/sms/send?route=${rotaKey}`, {
+          const res = await api.post(`/sms/send?route=${effectiveRotaKey}`, {
             to: [number],
-            from: shortcode,
+            from: effectiveShortcode,
             message: mensagem,
           });
           const data = res.data as Record<string, unknown>;
@@ -279,7 +276,7 @@ export default function Disparos() {
     display: 'flex', flexDirection: 'column', gap: 4,
   });
 
-  const canDispatch = !!rotaKey && !!shortcode.trim() && !!mensagem.trim() && total > 0;
+  const canDispatch = !!effectiveRotaKey && !!effectiveShortcode.trim() && !!mensagem.trim() && total > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -321,7 +318,7 @@ export default function Disparos() {
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {routes.map(route => {
-            const sel = rotaKey === route.key;
+            const sel = effectiveRotaKey === route.key;
             return (
               <button
                 key={route.key}
@@ -361,7 +358,7 @@ export default function Disparos() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {rotaSelecionada.shortcodes.map(sc => {
-              const sel = shortcode === sc;
+              const sel = effectiveShortcode === sc;
               return (
                 <button
                   key={sc}
