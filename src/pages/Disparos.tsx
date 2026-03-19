@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Send, Upload, Download, RefreshCw, CheckCircle2, XCircle,
@@ -135,8 +135,7 @@ export default function Disparos() {
   const [running, setRunning]   = useState(false);
   const [done, setDone]         = useState(false);
   const abortRef                = useRef(false);
-  const intervalRef             = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollUntilRef            = useRef<number>(0); // timestamp até quando continuar polling
+  const pollingActiveRef        = useRef(false); // true enquanto polling deve rodar
 
   // Números
   const numbers = parseNumbers(rawNumbers);
@@ -149,37 +148,50 @@ export default function Disparos() {
   const pending   = results.filter(r => r.status === 'pendente').length;
 
   // ── Polling webhooks ──────────────────────────────────────────────────────
-  const pollWebhooks = useCallback(async () => {
-    try {
-      const res = await webhookApi.events();
-      const events: WebhookEvent[] = res.data;
-      setResults(prev => prev.map(r => {
-        if (!r.messageId) return r;
-        const ev = events.find(e => e.messageId === r.messageId);
-        if (!ev) return r;
-        const newStatus = mapWebhookStatus(ev.statusCode);
-        if (newStatus === r.status) return r;
-        return { ...r, status: newStatus, statusLabel: ev.statusLabel ?? r.statusLabel, updatedAt: ev.updatedAt ?? new Date().toISOString() };
-      }));
-    } catch { /* silencioso */ }
-  }, []);
+  function startPolling() {
+    if (pollingActiveRef.current) return; // já rodando
+    pollingActiveRef.current = true;
 
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    const shouldPoll = running || (done && Date.now() < pollUntilRef.current);
-    if (shouldPoll) {
-      intervalRef.current = setInterval(pollWebhooks, 3000);
+    async function tick() {
+      if (!pollingActiveRef.current) return;
+      try {
+        const res = await webhookApi.events();
+        const events: WebhookEvent[] = res.data;
+        setResults(prev => prev.map(r => {
+          if (!r.messageId) return r;
+          const ev = events.find(e => e.messageId === r.messageId);
+          if (!ev) return r;
+          const newStatus = mapWebhookStatus(ev.statusCode);
+          if (newStatus === r.status) return r;
+          return { ...r, status: newStatus, statusLabel: ev.statusLabel ?? r.statusLabel, updatedAt: ev.updatedAt ?? new Date().toISOString() };
+        }));
+      } catch { /* silencioso */ }
+      if (pollingActiveRef.current) {
+        setTimeout(tick, 3000);
+      }
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [running, done, pollWebhooks]);
+
+    tick();
+  }
+
+  function stopPolling() {
+    pollingActiveRef.current = false;
+  }
+
+  // Para garantir cleanup no unmount
+  useEffect(() => {
+    return () => { pollingActiveRef.current = false; };
+  }, []);
 
   // ── Disparo ───────────────────────────────────────────────────────────────
   async function startDisparo() {
     if (!rotaKey || !shortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
 
     abortRef.current = false;
+    stopPolling();
     setDone(false);
     setRunning(true);
+    startPolling();
 
     const initial: SmsResult[] = numbers.map(n => ({
       number: n, messageId: null, status: 'pendente',
@@ -226,18 +238,21 @@ export default function Disparos() {
     }
 
     setRunning(false);
-    pollUntilRef.current = Date.now() + 5 * 60 * 1000; // polling por mais 5 minutos
     setDone(true);
+    // polling continua ativo (startPolling já foi chamado no início)
+    // para automaticamente após 5 min via setTimeout abaixo
+    setTimeout(stopPolling, 5 * 60 * 1000);
   }
 
   function stopDisparo() {
     abortRef.current = true;
     setRunning(false);
-    pollUntilRef.current = Date.now() + 5 * 60 * 1000;
     setDone(true);
+    setTimeout(stopPolling, 5 * 60 * 1000);
   }
 
   function resetDisparo() {
+    stopPolling();
     setResults([]);
     setDone(false);
     abortRef.current = false;
@@ -502,7 +517,7 @@ export default function Disparos() {
               }}>
                 <Upload size={14} /> Novo disparo
               </button>
-              <button onClick={pollWebhooks} style={{
+              <button onClick={startPolling} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '11px 18px', borderRadius: 10,
                 border: '1.5px solid #E0E0E0', background: '#FAFAFA',
