@@ -50,3 +50,12 @@ export const smsApi = {
 export const webhookApi = {
   events: () => api.get('/webhook/events'),
 };
+
+export const dispatchApi = {
+  saveReport: (data: {
+    routeKey: string;
+    shortcode: string;
+    message: string;
+    results: unknown[];
+  }) => api.post('/sms/dispatch-report', data),
+};

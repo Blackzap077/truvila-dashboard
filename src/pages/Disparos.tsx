@@ -4,7 +4,7 @@ import {
   Send, Upload, Download, RefreshCw, CheckCircle2, XCircle,
   Clock, AlertCircle, Hash, Users, FileText, Zap, ChevronDown,
 } from 'lucide-react';
-import { api, webhookApi, smsRoutesApi } from '../api/client';
+import { api, webhookApi, smsRoutesApi, dispatchApi } from '../api/client';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -81,17 +81,48 @@ function mapWebhookStatus(raw: string): SmsResult['status'] {
   }
 }
 
+function fmtDate(iso: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
+function fmtDuration(sentAt: string | null, updatedAt: string | null): string {
+  if (!sentAt || !updatedAt) return '';
+  const diff = Math.round((new Date(updatedAt).getTime() - new Date(sentAt).getTime()) / 1000);
+  if (diff < 0) return '';
+  if (diff < 60) return `${diff}s`;
+  const m = Math.floor(diff / 60), s = diff % 60;
+  return `${m}m ${s}s`;
+}
+
+function escapeCsv(val: string): string {
+  if (val.includes(';') || val.includes('"') || val.includes('\n')) {
+    return `"${val.replace(/"/g, '""')}"`;
+  }
+  return val;
+}
+
 function exportCSV(results: SmsResult[]) {
-  const header = 'Número,Message ID,Status,Label,Enviado em,Atualizado em';
-  const rows = results.map(r =>
-    [r.number, r.messageId ?? '', r.status, r.statusLabel,
-     r.sentAt ?? '', r.updatedAt ?? ''].join(',')
-  );
-  const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const sep = ';';
+  const header = ['Número', 'Message ID', 'Status', 'Enviado em (BRT)', 'Entregue em (BRT)', 'Duração'].map(escapeCsv).join(sep);
+  const rows = results.map(r => [
+    r.number,
+    r.messageId ?? '',
+    r.statusLabel,
+    fmtDate(r.sentAt),
+    fmtDate(r.updatedAt),
+    fmtDuration(r.sentAt, r.updatedAt),
+  ].map(escapeCsv).join(sep));
+  const bom = '\uFEFF'; // BOM para Excel reconhecer UTF-8
+  const blob = new Blob([bom + [header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `disparo_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  a.download = `disparo_${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }).replace(/[/:, ]/g, '-')}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -236,9 +267,18 @@ export default function Disparos() {
 
     setRunning(false);
     setDone(true);
-    // polling continua ativo (startPolling já foi chamado no início)
-    // para automaticamente após 5 min via setTimeout abaixo
     setTimeout(stopPolling, 5 * 60 * 1000);
+
+    // Salva relatório no banco com snapshot atual dos resultados
+    setResults(prev => {
+      dispatchApi.saveReport({
+        routeKey: effectiveRotaKey,
+        shortcode: effectiveShortcode,
+        message: mensagem,
+        results: prev,
+      }).catch(() => { /* silencioso */ });
+      return prev;
+    });
   }
 
   function stopDisparo() {
