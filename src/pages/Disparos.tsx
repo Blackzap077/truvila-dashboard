@@ -163,7 +163,9 @@ export default function Disparos() {
   const [running, setRunning]   = useState(false);
   const [done, setDone]         = useState(false);
   const abortRef                = useRef(false);
-  const pollingActiveRef        = useRef(false); // true enquanto polling deve rodar
+  const pollingActiveRef        = useRef(false);
+  const dispatchSinceRef        = useRef<string>(''); // ISO timestamp de início do disparo
+  const dispatchNumbersRef      = useRef<string[]>([]); // números do disparo atual
 
   // Números
   const numbers = parseNumbers(rawNumbers);
@@ -183,15 +185,25 @@ export default function Disparos() {
     async function tick() {
       if (!pollingActiveRef.current) return;
       try {
-        const res = await webhookApi.events();
+        const res = await webhookApi.events(dispatchSinceRef.current, dispatchNumbersRef.current);
         const events: WebhookEvent[] = res.data;
         setResults(prev => prev.map(r => {
-          if (!r.messageId) return r;
-          const ev = events.find(e => e.messageId === r.messageId);
+          // Cruzamento primário por messageId real
+          // Fallback por número SOMENTE quando messageId ainda não bateu (queued=true muda o ID)
+          // Após cruzar por número, atualiza o messageId para o real do webhook
+          const byId  = r.messageId ? events.find(e => e.messageId === r.messageId) : null;
+          const byNum = !byId ? events.find(e => e.to === r.number) : null;
+          const ev = byId ?? byNum ?? null;
           if (!ev) return r;
           const newStatus = mapWebhookStatus(ev.statusCode);
-          if (newStatus === r.status) return r;
-          return { ...r, status: newStatus, statusLabel: ev.statusLabel ?? r.statusLabel, updatedAt: ev.updatedAt ?? new Date().toISOString() };
+          if (newStatus === r.status && r.messageId === ev.messageId) return r;
+          return {
+            ...r,
+            status: newStatus,
+            statusLabel: ev.statusLabel ?? r.statusLabel,
+            messageId: ev.messageId, // fixa o messageId real para cruzamentos futuros
+            updatedAt: ev.updatedAt ?? new Date().toISOString(),
+          };
         }));
       } catch { /* silencioso */ }
       if (pollingActiveRef.current) {
@@ -216,6 +228,8 @@ export default function Disparos() {
     if (!effectiveRotaKey || !effectiveShortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
 
     abortRef.current = false;
+    dispatchSinceRef.current = new Date().toISOString();
+    dispatchNumbersRef.current = numbers;
     stopPolling();
     setDone(false);
     setRunning(true);

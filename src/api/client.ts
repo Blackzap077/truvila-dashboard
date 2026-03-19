@@ -48,7 +48,8 @@ export const smsApi = {
 };
 
 export const webhookApi = {
-  events: () => api.get('/webhook/events'),
+  events: (since?: string, numbers?: string[]) =>
+    api.get('/webhook/events', { params: { since, numbers: numbers?.join(',') } }),
 };
 
 export const dispatchApi = {
