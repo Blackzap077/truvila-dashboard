@@ -3,7 +3,7 @@ import {
   Send, Upload, Download, RefreshCw, CheckCircle2, XCircle,
   Clock, AlertCircle, Hash, Users, FileText, Zap, ChevronDown,
 } from 'lucide-react';
-import { webhookApi } from '../api/client';
+import { api, webhookApi } from '../api/client';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -24,8 +24,6 @@ interface WebhookEvent {
   to: string;
   updatedAt: string;
 }
-
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://backend-production-b055.up.railway.app';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -93,7 +91,7 @@ function exportCSV(results: SmsResult[]) {
 export default function Disparos() {
   // Config
   const [shortcode, setShortcode]   = useState('');
-  const [token, setToken]           = useState('');
+  const [rota, setRota]             = useState<'blk' | 'bet' | 'white'>('blk');
   const [mensagem, setMensagem]     = useState('');
   const [rawNumbers, setRawNumbers] = useState('');
   const [batchSize, setBatchSize]   = useState(10);
@@ -151,7 +149,7 @@ export default function Disparos() {
 
   // ── Disparo ───────────────────────────────────────────────────────────────
   async function startDisparo() {
-    if (!token.trim() || !mensagem.trim() || numbers.length === 0) return;
+    if (!shortcode.trim() || !mensagem.trim() || numbers.length === 0) return;
 
     abortRef.current = false;
     setDone(false);
@@ -173,30 +171,21 @@ export default function Disparos() {
         const idx = i + bi;
         setResults(prev => prev.map((r, j) => j === idx ? { ...r, status: 'enviando', statusLabel: 'Enviando...' } : r));
         try {
-          const res = await fetch(`${BASE_URL}/sms/send`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('truvila_token') ?? ''}`,
-              'x-sintegrax-token': token,
-            },
-            body: JSON.stringify({ to: number, message: mensagem, shortcode: shortcode || undefined }),
+          const res = await api.post(`/sms/send?route=${rota}`, {
+            to: [number],
+            from: shortcode,
+            message: mensagem,
           });
-          const data = await res.json().catch(() => ({}));
-          if (res.ok) {
-            setResults(prev => prev.map((r, j) => j === idx ? {
-              ...r, status: 'enviado', statusLabel: 'Enviado',
-              messageId: data?.messageId ?? data?.id ?? null,
-              sentAt: new Date().toISOString(),
-            } : r));
-          } else {
-            setResults(prev => prev.map((r, j) => j === idx ? {
-              ...r, status: 'falha', statusLabel: 'Falha',
-              error: data?.message ?? `HTTP ${res.status}`,
-            } : r));
-          }
+          const data = res.data as Record<string, unknown>;
+          setResults(prev => prev.map((r, j) => j === idx ? {
+            ...r, status: 'enviado', statusLabel: 'Enviado',
+            messageId: (data?.messageId ?? data?.id ?? null) as string | null,
+            sentAt: new Date().toISOString(),
+          } : r));
         } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : 'Erro de rede';
+          const msg =
+            (e as { response?: { data?: { message?: string } } })?.response?.data?.message
+            ?? (e instanceof Error ? e.message : 'Erro no envio');
           setResults(prev => prev.map((r, j) => j === idx ? {
             ...r, status: 'falha', statusLabel: 'Falha', error: msg,
           } : r));
@@ -281,28 +270,33 @@ export default function Disparos() {
       {/* Config cards */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
-        {/* Token */}
+        {/* Rota + Shortcode */}
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <Zap size={15} color="#E8450A" />
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Credenciais</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Configuração</span>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <div style={label}>Token da Sintegrax</div>
-            <input
-              style={{ ...input, fontFamily: 'monospace', fontSize: 12 }}
-              type="password"
-              placeholder="Seu token de integração..."
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              disabled={running}
-            />
+            <div style={label}>Rota de envio</div>
+            <div style={{ position: 'relative' }}>
+              <select
+                value={rota}
+                onChange={e => setRota(e.target.value as 'blk' | 'bet' | 'white')}
+                disabled={running}
+                style={{ ...input, appearance: 'none', paddingRight: 32, cursor: 'pointer' }}
+              >
+                <option value="blk">ALL Brazil (blk)</option>
+                <option value="bet">Cassino Direct (bet)</option>
+                <option value="white">White Label (white)</option>
+              </select>
+              <ChevronDown size={14} color="#888" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+            </div>
           </div>
           <div>
             <div style={label}>Shortcode (Remetente)</div>
             <input
               style={{ ...input, fontFamily: 'monospace' }}
-              placeholder="Ex: 28008"
+              placeholder="Ex: 9100663"
               value={shortcode}
               onChange={e => setShortcode(e.target.value)}
               disabled={running}
@@ -420,11 +414,11 @@ export default function Disparos() {
         {!running && !done && (
           <button
             onClick={startDisparo}
-            disabled={!token.trim() || !mensagem.trim() || total === 0}
+            disabled={!shortcode.trim() || !mensagem.trim() || total === 0}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '12px 28px', borderRadius: 10,
-              background: (!token.trim() || !mensagem.trim() || total === 0)
+              background: (!shortcode.trim() || !mensagem.trim() || total === 0)
                 ? '#E0E0E0'
                 : 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)',
               color: '#fff', border: 'none',
