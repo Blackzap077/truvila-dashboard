@@ -185,8 +185,12 @@ export default function Disparos() {
     async function tick() {
       if (!pollingActiveRef.current) return;
       try {
-        const res = await webhookApi.events(dispatchSinceRef.current, dispatchNumbersRef.current);
-        const events: WebhookEvent[] = res.data;
+        // Passa só since — filtro por numbers na query string seria enorme com 5k números
+        const res = await webhookApi.events(dispatchSinceRef.current, []);
+        const allEvents: WebhookEvent[] = res.data;
+        // Filtra localmente pelos números do disparo atual
+        const numbersSet = new Set(dispatchNumbersRef.current);
+        const events = allEvents.filter(e => numbersSet.has(e.to));
         setResults(prev => prev.map(r => {
           // Cruzamento primário por messageId real
           // Fallback por número SOMENTE quando messageId ainda não bateu (queued=true muda o ID)
