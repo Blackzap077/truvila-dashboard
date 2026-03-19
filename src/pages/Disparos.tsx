@@ -249,21 +249,15 @@ export default function Disparos() {
         const idx = i + bi;
         setResults(prev => prev.map((r, j) => j === idx ? { ...r, status: 'enviando', statusLabel: 'Enviando...' } : r));
         try {
-          const res = await api.post(`/sms/send?route=${effectiveRotaKey}`, {
+          await api.post(`/sms/send?route=${effectiveRotaKey}`, {
             to: [number],
             from: effectiveShortcode,
             message: mensagem,
           });
-          const data = res.data as Record<string, unknown>;
-          // Sintegrax retorna: { data: [{ messageId, queued, ... }] }
-          const arr = data?.data as Record<string, unknown>[] | undefined;
-          const first = arr?.[0] ?? data;
-          const isQueued = first?.queued === true;
-          // Quando queued=true o messageId é temporário — aguarda o webhook com o ID real
-          const msgId = isQueued ? null : (first?.messageId ?? first?.id ?? first?.message_id ?? null) as string | null;
+          // messageId real sempre vem pelo webhook — nunca usar o do POST (pode ser temporário)
           setResults(prev => prev.map((r, j) => j === idx ? {
             ...r, status: 'enviado', statusLabel: 'Enviado',
-            messageId: msgId,
+            messageId: null,
             sentAt: new Date().toISOString(),
           } : r));
         } catch (e: unknown) {
