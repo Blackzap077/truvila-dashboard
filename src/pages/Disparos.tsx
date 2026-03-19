@@ -255,10 +255,12 @@ export default function Disparos() {
             message: mensagem,
           });
           const data = res.data as Record<string, unknown>;
-          // Sintegrax retorna: { data: [{ messageId, ... }] }
+          // Sintegrax retorna: { data: [{ messageId, queued, ... }] }
           const arr = data?.data as Record<string, unknown>[] | undefined;
           const first = arr?.[0] ?? data;
-          const msgId = (first?.messageId ?? first?.id ?? first?.message_id ?? null) as string | null;
+          const isQueued = first?.queued === true;
+          // Quando queued=true o messageId é temporário — aguarda o webhook com o ID real
+          const msgId = isQueued ? null : (first?.messageId ?? first?.id ?? first?.message_id ?? null) as string | null;
           setResults(prev => prev.map((r, j) => j === idx ? {
             ...r, status: 'enviado', statusLabel: 'Enviado',
             messageId: msgId,
