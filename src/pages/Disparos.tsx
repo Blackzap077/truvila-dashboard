@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Send, Upload, Download, RefreshCw, CheckCircle2, XCircle,
   Clock, AlertCircle, Hash, Users, FileText, Zap, ChevronDown,
+  List, ArrowLeft,
 } from 'lucide-react';
 import { api, webhookApi, smsRoutesApi, dispatchApi } from '../api/client';
 
@@ -33,6 +34,291 @@ interface WebhookEvent {
   statusLabel: string;
   to: string;
   updatedAt: string;
+}
+
+interface CampanhaItem {
+  id: string;
+  routeKey: string;
+  shortcode: string;
+  message: string;
+  totalNumbers: number;
+  delivered: number;
+  sent: number;
+  failed: number;
+  createdAt: string;
+}
+
+interface CampanhaDetalhe extends CampanhaItem {
+  results: SmsResult[];
+}
+
+// ─── Componente Detalhe de Campanha ───────────────────────────────────────────
+
+function CampanhaDetalhePage({ id, onBack }: { id: string; onBack: () => void }) {
+  const pollingRef = useRef(false);
+  const [detalhe, setDetalhe] = useState<CampanhaDetalhe | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Carrega e atualiza a cada 5s
+  useEffect(() => {
+    pollingRef.current = true;
+    async function load() {
+      try {
+        const res = await dispatchApi.getReport(id);
+        setDetalhe(res.data);
+      } catch { /* silencioso */ }
+      setLoading(false);
+      if (pollingRef.current) setTimeout(load, 5000);
+    }
+    load();
+    return () => { pollingRef.current = false; };
+  }, [id]);
+
+  const card: React.CSSProperties = {
+    background: '#fff', borderRadius: 12,
+    border: '1.5px solid #F0F0EE', padding: '20px 24px',
+  };
+  const statCard = (color: string): React.CSSProperties => ({
+    flex: 1, background: '#fff', borderRadius: 10,
+    border: `1.5px solid ${color}22`, padding: '14px 16px',
+    display: 'flex', flexDirection: 'column', gap: 4,
+  });
+
+  if (loading) return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>
+      <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
+    </div>
+  );
+  if (!detalhe) return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>Campanha não encontrada.</div>
+  );
+
+  const pending = detalhe.results.filter(r => r.status === 'pendente' || r.status === 'enviando').length;
+  const enviados = detalhe.sent - detalhe.delivered - detalhe.failed;
+
+  function exportCSVDetalhe() {
+    const sep = ';';
+    const header = ['Número', 'Message ID', 'Status', 'Enviado em (BRT)', 'Entregue em (BRT)', 'Duração'].join(sep);
+    const rows = detalhe!.results.map(r => [
+      r.number,
+      r.messageId ?? '',
+      r.statusLabel,
+      r.sentAt ? new Date(r.sentAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '',
+      r.updatedAt ? new Date(r.updatedAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '',
+      r.sentAt && r.updatedAt
+        ? (() => { const d = Math.round((new Date(r.updatedAt!).getTime() - new Date(r.sentAt!).getTime()) / 1000); return d < 60 ? `${d}s` : `${Math.floor(d/60)}m ${d%60}s`; })()
+        : '',
+    ].join(sep));
+    const blob = new Blob(['\uFEFF' + [header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `campanha_${id.slice(0,8)}.csv`; a.click();
+  }
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: 920, fontFamily: 'Inter, sans-serif' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={onBack} style={{ background: 'none', border: '1.5px solid #E0E0E0', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#555', fontWeight: 600 }}>
+            <ArrowLeft size={14} /> Voltar
+          </button>
+          <div>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: '#1A1A1A', marginBottom: 2 }}>
+              Campanha — {new Date(detalhe.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+            </h1>
+            <p style={{ fontSize: 12, color: '#888' }}>
+              Rota: <strong>{detalhe.routeKey}</strong> · Shortcode: <strong>{detalhe.shortcode}</strong> · Atualizando a cada 5s
+            </p>
+          </div>
+        </div>
+        <button onClick={exportCSVDetalhe} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '9px 16px', borderRadius: 8,
+          border: '1.5px solid #E0E0E0', background: '#FAFAFA',
+          fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer',
+        }}>
+          <Download size={14} /> Exportar CSV
+        </button>
+      </div>
+
+      {/* Mensagem */}
+      <div style={{ ...card, marginBottom: 16, fontSize: 13, color: '#555', background: '#FAFAFA' }}>
+        <span style={{ fontWeight: 600, color: '#1A1A1A' }}>Mensagem: </span>{detalhe.message}
+      </div>
+
+      {/* Stats */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+        {[
+          { label: 'Total',     val: detalhe.totalNumbers, color: '#888888' },
+          { label: 'Entregues', val: detalhe.delivered,    color: '#4CAF50' },
+          { label: 'Enviados',  val: enviados < 0 ? 0 : enviados, color: '#2196F3' },
+          { label: 'Falhas',    val: detalhe.failed,       color: '#F44336' },
+          { label: 'Pendentes', val: pending,              color: '#AAAAAA' },
+        ].map(({ label, val, color }) => (
+          <div key={label} style={statCard(color)}>
+            <div style={{ fontSize: 10, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: label === 'Total' ? '#1A1A1A' : color }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Barra de progresso */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ height: 5, background: '#F0F0EE', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%',
+            width: `${detalhe.totalNumbers > 0 ? ((detalhe.delivered + detalhe.failed) / detalhe.totalNumbers) * 100 : 0}%`,
+            background: 'linear-gradient(90deg, #E8450A, #FF6B35)',
+            borderRadius: 3, transition: 'width 0.5s ease',
+          }} />
+        </div>
+        <div style={{ fontSize: 11, color: '#888', marginTop: 4, textAlign: 'right' }}>
+          {detalhe.totalNumbers > 0
+            ? `${Math.round(((detalhe.delivered + detalhe.failed) / detalhe.totalNumbers) * 100)}%`
+            : '0%'} com resposta
+        </div>
+      </div>
+
+      {/* Tabela */}
+      <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid #F0F0EE' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#1A1A1A' }}>Resultados</span>
+        </div>
+        <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA' }}>
+                {['Número', 'Message ID', 'Status', 'Enviado em', 'Atualizado em'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: '1px solid #F0F0EE', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {detalhe.results.map((r, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #F8F8F8' }}>
+                  <td style={{ padding: '9px 16px', fontSize: 13, fontFamily: 'monospace', color: '#1A1A1A' }}>{r.number}</td>
+                  <td style={{ padding: '9px 16px', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>{r.messageId ?? '—'}</td>
+                  <td style={{ padding: '9px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {r.status === 'entregue' ? <CheckCircle2 size={13} color="#4CAF50" /> :
+                       r.status === 'invalido' || r.status === 'falha' ? <XCircle size={13} color="#F44336" /> :
+                       r.status === 'expirado' ? <AlertCircle size={13} color="#FF9800" /> :
+                       <Clock size={13} color="#AAAAAA" />}
+                      <span style={{ fontSize: 12, fontWeight: 600, color:
+                        r.status === 'entregue' ? '#4CAF50' :
+                        r.status === 'invalido' || r.status === 'falha' ? '#F44336' :
+                        r.status === 'expirado' ? '#FF9800' : '#AAAAAA'
+                      }}>{r.statusLabel}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '9px 16px', fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
+                    {r.sentAt ? new Date(r.sentAt).toLocaleTimeString('pt-BR') : '—'}
+                  </td>
+                  <td style={{ padding: '9px 16px', fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
+                    {r.updatedAt ? new Date(r.updatedAt).toLocaleTimeString('pt-BR') : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Componente Lista de Campanhas ────────────────────────────────────────────
+
+function CampanhasPage({ onOpen }: { onOpen: (id: string) => void }) {
+  const { data: campanhas = [], isLoading, refetch } = useQuery<CampanhaItem[]>({
+    queryKey: ['dispatch-reports'],
+    queryFn: () => dispatchApi.list().then(r => r.data),
+    refetchInterval: 10000,
+  });
+
+  const card: React.CSSProperties = {
+    background: '#fff', borderRadius: 12,
+    border: '1.5px solid #F0F0EE', padding: '20px 24px',
+  };
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: 920, fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1A1A1A', marginBottom: 4 }}>Campanhas</h1>
+          <p style={{ fontSize: 13, color: '#888' }}>Histórico de disparos realizados, com status atualizado.</p>
+        </div>
+        <button onClick={() => refetch()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1.5px solid #E0E0E0', background: '#FAFAFA', fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer' }}>
+          <RefreshCw size={13} /> Atualizar
+        </button>
+      </div>
+
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+          <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
+        </div>
+      )}
+
+      {!isLoading && campanhas.length === 0 && (
+        <div style={{ ...card, textAlign: 'center', color: '#888', padding: 40 }}>
+          Nenhuma campanha encontrada. Faça um disparo para criar o primeiro relatório.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {campanhas.map(c => {
+          const pct = c.totalNumbers > 0 ? Math.round(((c.delivered + c.failed) / c.totalNumbers) * 100) : 0;
+          return (
+            <button
+              key={c.id}
+              onClick={() => onOpen(c.id)}
+              style={{ ...card, cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'border-color 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = '#E8450A')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = '#F0F0EE')}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1A1A', marginBottom: 2 }}>
+                    {new Date(c.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Rota: <strong>{c.routeKey}</strong> · Shortcode: <strong>{c.shortcode}</strong>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#1A1A1A' }}>{c.totalNumbers}</div>
+                    <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>Total</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#4CAF50' }}>{c.delivered}</div>
+                    <div style={{ fontSize: 10, color: '#4CAF50', textTransform: 'uppercase', letterSpacing: 0.3 }}>Entregues</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#F44336' }}>{c.failed}</div>
+                    <div style={{ fontSize: 10, color: '#F44336', textTransform: 'uppercase', letterSpacing: 0.3 }}>Falhas</div>
+                  </div>
+                  <div style={{ textAlign: 'center', minWidth: 48 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#E8450A' }}>{pct}%</div>
+                    <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 0.3 }}>Resposta</div>
+                  </div>
+                </div>
+              </div>
+              {/* Mini barra */}
+              <div style={{ height: 4, background: '#F0F0EE', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, #4CAF50, #81C784)', borderRadius: 2 }} />
+              </div>
+              {/* Trecho da mensagem */}
+              <div style={{ marginTop: 8, fontSize: 12, color: '#AAA', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {c.message}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -129,7 +415,30 @@ function exportCSV(results: SmsResult[]) {
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
+// ─── Barra de Tabs compartilhada ─────────────────────────────────────────────
+
+function TabBar({ tab, setTab }: { tab: 'novo' | 'campanhas'; setTab: (t: 'novo' | 'campanhas') => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #F0F0EE', padding: '0 32px', fontFamily: 'Inter, sans-serif' }}>
+      {(['novo', 'campanhas'] as const).map(t => (
+        <button key={t} onClick={() => setTab(t)} style={{
+          padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600,
+          color: tab === t ? '#E8450A' : '#888',
+          borderBottom: tab === t ? '2px solid #E8450A' : '2px solid transparent',
+          marginBottom: -2, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          {t === 'novo' ? <><Send size={13} /> Novo Disparo</> : <><List size={13} /> Campanhas</>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Disparos() {
+  const [tab, setTab] = useState<'novo' | 'campanhas'>('novo');
+  const [campanhaId, setCampanhaId] = useState<string | null>(null);
+
   // Rotas do backend
   const { data: routes = [], isLoading: loadingRoutes } = useQuery<SmsRoute[]>({
     queryKey: ['sms-routes'],
@@ -333,8 +642,27 @@ export default function Disparos() {
   const canDispatch = !!effectiveRotaKey && !!effectiveShortcode.trim() && !!mensagem.trim() && total > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (tab === 'campanhas' && campanhaId) {
+    return (
+      <div>
+        <TabBar tab={tab} setTab={t => { setTab(t); setCampanhaId(null); }} />
+        <CampanhaDetalhePage id={campanhaId} onBack={() => setCampanhaId(null)} />
+      </div>
+    );
+  }
+  if (tab === 'campanhas') {
+    return (
+      <div>
+        <TabBar tab={tab} setTab={setTab} />
+        <CampanhasPage onOpen={id => setCampanhaId(id)} />
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 920, fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ fontFamily: 'Inter, sans-serif' }}>
+      <TabBar tab={tab} setTab={setTab} />
+    <div style={{ padding: '28px 32px', maxWidth: 920 }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -667,6 +995,7 @@ export default function Disparos() {
         input:disabled, textarea:disabled, select:disabled { opacity: 0.6; cursor: not-allowed; }
         button:disabled { opacity: 0.6; }
       `}</style>
+    </div>
     </div>
   );
 }

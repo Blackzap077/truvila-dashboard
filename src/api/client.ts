@@ -61,4 +61,6 @@ export const dispatchApi = {
     message: string;
     results: unknown[];
   }) => api.post('/sms/dispatch-report', data),
+  list: () => api.get('/sms/dispatch-report'),
+  getReport: (id: string) => api.get(`/sms/dispatch-report/${id}`),
 };
