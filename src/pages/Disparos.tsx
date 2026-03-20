@@ -229,7 +229,7 @@ function CampanhaDetalhePage({ id, onBack }: { id: string; onBack: () => void })
 
 // ─── Componente Lista de Campanhas ────────────────────────────────────────────
 
-function CampanhasPage({ onOpen }: { onOpen: (id: string) => void }) {
+function CampanhasPage({ onOpen, onNovo }: { onOpen: (id: string) => void; onNovo: () => void }) {
   const { data: campanhas = [], isLoading, refetch } = useQuery<CampanhaItem[]>({
     queryKey: ['dispatch-reports'],
     queryFn: () => dispatchApi.list().then(r => r.data),
@@ -248,9 +248,14 @@ function CampanhasPage({ onOpen }: { onOpen: (id: string) => void }) {
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1A1A1A', marginBottom: 4 }}>Campanhas</h1>
           <p style={{ fontSize: 13, color: '#888' }}>Histórico de disparos realizados, com status atualizado.</p>
         </div>
-        <button onClick={() => refetch()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1.5px solid #E0E0E0', background: '#FAFAFA', fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer' }}>
-          <RefreshCw size={13} /> Atualizar
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => refetch()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1.5px solid #E0E0E0', background: '#FAFAFA', fontSize: 13, fontWeight: 600, color: '#444', cursor: 'pointer' }}>
+            <RefreshCw size={13} /> Atualizar
+          </button>
+          <button onClick={onNovo} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #E8450A 0%, #FF6B35 100%)', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
+            <Send size={13} /> Criar campanha
+          </button>
+        </div>
       </div>
 
       {isLoading && (
@@ -654,7 +659,7 @@ export default function Disparos() {
     return (
       <div>
         <TabBar tab={tab} setTab={setTab} />
-        <CampanhasPage onOpen={id => setCampanhaId(id)} />
+        <CampanhasPage onOpen={id => setCampanhaId(id)} onNovo={() => setTab('novo')} />
       </div>
     );
   }
