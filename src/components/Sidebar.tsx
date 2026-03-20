@@ -3,7 +3,7 @@ import {
   LayoutGrid, Users, Megaphone, Zap, BarChart2,
   Plug, CreditCard, HelpCircle, Settings,
   Eye, Settings2, ChevronDown, PanelLeftClose, PanelLeftOpen,
-  MessageCircle, Moon, Sun, Send,
+  MessageCircle, Moon, Sun, Send, Layers,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -140,6 +140,7 @@ export default function Sidebar() {
           }
         />
         <NavItem to="/configuracoes" collapsed={collapsed} icon={<Settings size={14} />} label="Configurações" />
+        <NavItem to="/componentes" collapsed={collapsed} icon={<Layers size={14} />} label="Componentes" />
       </div>
 
       {/* spacer */}
