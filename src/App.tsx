@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Integracoes from './pages/Integracoes';
 import Disparos from './pages/Disparos';
 import Placeholder from './pages/Placeholder';
+import Componentes from './pages/Componentes';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000 } },
@@ -38,6 +39,8 @@ function AppRoutes() {
       <Route path="/financeiro" element={<PrivateRoute><Placeholder title="Financeiro" /></PrivateRoute>} />
       <Route path="/suporte" element={<PrivateRoute><Placeholder title="Suporte" /></PrivateRoute>} />
       <Route path="/configuracoes" element={<PrivateRoute><Placeholder title="Configurações" /></PrivateRoute>} />
+
+      <Route path="/componentes" element={<PrivateRoute><Componentes /></PrivateRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
